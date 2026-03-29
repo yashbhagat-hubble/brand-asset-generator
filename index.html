@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Brand Asset Generator · Hubble</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1431,15 +1432,24 @@ function showTab(tab, fromEdit = false) {
   if (tab === 'add' && !fromEdit) { editingBrandId = null; setSaveBrandMode(false); }
 }
 
-// ── Save brand ─────────────────────────────────────────────────────────
+// ── Supabase ────────────────────────────────────────────────────────────
+const _sb = supabase.createClient(
+  'https://ddewjocplyzokykcwpvn.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkZXdqb2NwbHl6b2t5a2N3cHZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MDUxNTQsImV4cCI6MjA5MDM4MTE1NH0.64kQ94lyhFu25paPJ1Rc98RXrvHwUquqE3d22aO9RQs'
+);
+
+// ── Edit mode ──────────────────────────────────────────────────────────
 let editingBrandId = null;
 
 function setSaveBrandMode(editing) {
-  const btn = document.querySelector('.save-brand-btn');
-  btn.textContent = editing ? 'Save Changes' : 'Save Brand';
+  document.querySelector('.save-brand-btn').textContent = editing ? 'Save Changes' : 'Save Brand';
 }
 
-function saveBrand() {
+// ── Save brand ─────────────────────────────────────────────────────────
+async function saveBrand() {
+  const btn = document.querySelector('.save-brand-btn');
+  btn.textContent = 'Saving…'; btn.disabled = true;
+
   const name = (document.getElementById('brandName').value || '').trim() || 'Untitled';
   const solidDataUrl = document.getElementById('c-solid').toDataURL('image/png');
 
@@ -1456,20 +1466,16 @@ function saveBrand() {
     id: editingBrandId || Date.now(),
     name,
     color: S.color,
-    solidLogoDataUrl: solidDataUrl,
-    logoDataUrl: imgToDataUrl(S.logoImg),
-    productDataUrl: imgToDataUrl(S.productImg),
+    solid_logo: solidDataUrl,
+    logo: imgToDataUrl(S.logoImg),
+    product: imgToDataUrl(S.productImg),
     sliders: { iconScale: S.iconScale, iconOffset: S.iconOffset, imgScale: S.imgScale, imgOffset: S.imgOffset }
   };
 
-  let brands = JSON.parse(localStorage.getItem('savedBrands') || '[]');
-  if (editingBrandId) {
-    brands = brands.map(b => b.id === editingBrandId ? entry : b);
-  } else {
-    brands.push(entry);
-  }
+  const { error } = await _sb.from('brands').upsert(entry);
+  if (error) { alert('Save failed: ' + error.message); }
 
-  localStorage.setItem('savedBrands', JSON.stringify(brands));
+  btn.disabled = false;
   editingBrandId = null;
   setSaveBrandMode(false);
   showTab('brands');
@@ -1493,18 +1499,18 @@ async function loadBrand(brand) {
     document.getElementById('imgOffsetVal').textContent  = S.imgOffset  + 'px';
   }
 
-  function loadImg(dataUrl, nameEl, name) {
+  function loadImg(dataUrl, nameEl, label) {
     if (!dataUrl) return Promise.resolve(null);
     return new Promise(res => {
       const img = new Image();
-      img.onload = () => { if (nameEl) document.getElementById(nameEl).textContent = name; res(img); };
+      img.onload = () => { if (nameEl) document.getElementById(nameEl).textContent = label; res(img); };
       img.onerror = () => res(null);
       img.src = dataUrl;
     });
   }
 
-  S.logoImg    = await loadImg(brand.logoDataUrl,    'logoFileName',  brand.name + ' logo');
-  S.productImg = await loadImg(brand.productDataUrl, 'imageFileName', brand.name + ' product');
+  S.logoImg    = await loadImg(brand.logo,    'logoFileName',  brand.name + ' logo');
+  S.productImg = await loadImg(brand.product, 'imageFileName', brand.name + ' product');
 
   editingBrandId = brand.id;
   setSaveBrandMode(true);
@@ -1513,10 +1519,14 @@ async function loadBrand(brand) {
 }
 
 // ── Render brands grid ──────────────────────────────────────────────────
-function renderBrandsGrid() {
-  const brands = JSON.parse(localStorage.getItem('savedBrands') || '[]');
+async function renderBrandsGrid() {
   const grid = document.getElementById('brandsGrid');
-  if (brands.length === 0) {
+  grid.innerHTML = '<div class="brands-empty">Loading…</div>';
+
+  const { data: brands, error } = await _sb.from('brands').select('*').order('created_at', { ascending: false });
+  if (error) { grid.innerHTML = '<div class="brands-empty">Failed to load brands.</div>'; return; }
+
+  if (!brands || brands.length === 0) {
     grid.innerHTML = '<div class="brands-empty">No saved brands yet.<br>Set up a brand and click <strong>Save Brand</strong>.</div>';
     return;
   }
@@ -1525,7 +1535,7 @@ function renderBrandsGrid() {
     const tile = document.createElement('div');
     tile.className = 'brand-tile';
     tile.innerHTML = `
-      <img src="${b.solidLogoDataUrl}" alt="${b.name}">
+      <img src="${b.solid_logo}" alt="${b.name}">
       <div class="brand-tile-name">${b.name}</div>
       <div class="brand-tile-actions">
         <button class="brand-tile-btn edit" title="Edit">✎</button>
@@ -1533,11 +1543,10 @@ function renderBrandsGrid() {
       </div>`;
 
     tile.querySelector('.edit').addEventListener('click', e => { e.stopPropagation(); loadBrand(b); });
-    tile.querySelector('.delete').addEventListener('click', e => {
+    tile.querySelector('.delete').addEventListener('click', async e => {
       e.stopPropagation();
       if (!confirm(`Delete "${b.name}"? This cannot be undone.`)) return;
-      const all = JSON.parse(localStorage.getItem('savedBrands') || '[]');
-      localStorage.setItem('savedBrands', JSON.stringify(all.filter(x => x.id !== b.id)));
+      await _sb.from('brands').delete().eq('id', b.id);
       renderBrandsGrid();
     });
     tile.addEventListener('click', () => loadBrand(b));
