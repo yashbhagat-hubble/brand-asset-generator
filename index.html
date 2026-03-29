@@ -1484,6 +1484,7 @@ async function saveBrand() {
 
   const name = (document.getElementById('brandName').value || '').trim() || 'Untitled';
   const solidDataUrl = document.getElementById('c-solid').toDataURL('image/png');
+  const iconDataUrl  = document.getElementById('c-sq-icon').toDataURL('image/png');
 
   function imgToDataUrl(img) {
     if (!img) return null;
@@ -1499,6 +1500,7 @@ async function saveBrand() {
     name,
     color: S.color,
     solid_logo: solidDataUrl,
+    icon: iconDataUrl,
     logo: imgToDataUrl(S.logoImg),
     product: imgToDataUrl(S.productImg),
     sliders: { iconScale: S.iconScale, iconOffset: S.iconOffset, imgScale: S.imgScale, imgOffset: S.imgOffset }
@@ -1565,7 +1567,7 @@ async function renderBrandsGrid() {
       const tile = document.createElement('div');
       tile.className = 'brand-tile';
       tile.innerHTML = `
-        <img src="${b.solid_logo}" alt="${b.name}">
+        <img src="${b.icon || b.solid_logo}" alt="${b.name}">
         <div class="brand-tile-name">${b.name}</div>
         <div class="brand-tile-actions">
           <button class="brand-tile-btn edit" title="Edit">✎</button>
